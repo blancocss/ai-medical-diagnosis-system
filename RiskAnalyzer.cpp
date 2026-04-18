@@ -1,198 +1,120 @@
 /*
-Risk Analyzer System
---------------------
-
-This program calculates:
-
-1) Risk Level
-2) Severity Level
-3) Risk Score
-4) Medical Recommendation
-5) Case Classification
-
-Used by:
-medical_gui.py
-*/
+ * RiskAnalyzer.cpp
+ * ================
+ * Risk analysis engine called by medical_gui.py via subprocess.
+ *
+ * Input  (stdin): symptom_count  probability
+ * Output (stdout): risk|severity|recommendation|case_type|score
+ * Errors (stderr): human-readable message (non-zero exit code)
+ *
+ * Improvements over original:
+ *   - Input validation with meaningful error messages to stderr
+ *   - Boundary clamping for edge-case inputs
+ *   - Consistent pipe-delimited output format
+ *   - Non-zero exit code on error (detected by Python caller)
+ *   - Comments throughout
+ */
 
 #include <iostream>
 #include <string>
-
-using namespace std;
+#include <sstream>
+#include <cmath>
 
 class RiskAnalyzer
 {
-
 private:
-
-    int symptomCount;
-
+    int    symptomCount;
     double probability;
-
-    int riskScore;
+    int    riskScore;
 
 public:
-
-    // Constructor
-
-    RiskAnalyzer(
-        int count,
-        double prob
-    )
+    // ── Constructor ───────────────────────────────────────────────────────────
+    RiskAnalyzer(int count, double prob)
+        : symptomCount(count),
+          probability(std::max(0.0, std::min(100.0, prob))),   // clamp 0-100
+          riskScore(0)
     {
-        symptomCount = count;
-
-        probability = prob;
-
+        if (symptomCount < 0) symptomCount = 0;
         riskScore = calculateScore();
     }
 
-    // =========================
-    // Calculate Risk Score
-    // =========================
-
-    int calculateScore()
+    // ── Score = weighted sum of symptom count and probability ─────────────────
+    int calculateScore() const
     {
-
-        int score = 0;
-
-        score += symptomCount * 5;
-
-        score += probability / 2;
-
-        return score;
+        int score = (symptomCount * 5) + static_cast<int>(probability / 2.0);
+        return std::min(score, 100);   // cap at 100
     }
 
-    // =========================
-    // Risk Level
-    // =========================
-
-    string calculateRiskLevel()
+    // ── Risk level based on score ─────────────────────────────────────────────
+    std::string calculateRiskLevel() const
     {
-
-        if (riskScore < 30)
-
-            return "Low";
-
-        else if (riskScore < 60)
-
-            return "Medium";
-
-        else
-
-            return "High";
+        if (riskScore < 30) return "Low";
+        if (riskScore < 60) return "Medium";
+        return "High";
     }
 
-    // =========================
-    // Severity Level
-    // =========================
-
-    string calculateSeverity()
+    // ── Severity based on probability ─────────────────────────────────────────
+    std::string calculateSeverity() const
     {
-
-        if (probability < 40)
-
-            return "Mild";
-
-        else if (probability < 70)
-
-            return "Moderate";
-
-        else
-
-            return "Severe";
+        if (probability < 40.0) return "Mild";
+        if (probability < 70.0) return "Moderate";
+        return "Severe";
     }
 
-    // =========================
-    // Recommendation
-    // =========================
-
-    string getRecommendation()
+    // ── Recommendation based on risk level ────────────────────────────────────
+    std::string getRecommendation() const
     {
-
-        string risk = calculateRiskLevel();
-
-        if (risk == "Low")
-
-            return "Home care";
-
-        if (risk == "Medium")
-
-            return "Visit doctor";
-
-        return "Emergency";
+        const std::string level = calculateRiskLevel();
+        if (level == "Low")    return "Home care and rest recommended";
+        if (level == "Medium") return "Schedule a doctor visit soon";
+        return "Seek emergency medical attention immediately";
     }
 
-    // =========================
-    // Case Classification
-    // =========================
-
-    string classifyCase()
+    // ── Case classification ───────────────────────────────────────────────────
+    std::string classifyCase() const
     {
-
-        if (riskScore >= 80)
-
-            return "Critical";
-
-        if (riskScore >= 50)
-
-            return "Serious";
-
+        if (riskScore >= 80) return "Critical";
+        if (riskScore >= 50) return "Serious";
         return "Stable";
     }
 
-    // =========================
-    // Print Report
-    // =========================
-
-    void printReport()
+    // ── Print pipe-delimited result to stdout ─────────────────────────────────
+    void printReport() const
     {
-
-        cout
-
-        << calculateRiskLevel()
-
-        << "|"
-
-        << calculateSeverity()
-
-        << "|"
-
-        << getRecommendation()
-
-        << "|"
-
-        << classifyCase()
-
-        << "|"
-
-        << riskScore;
+        std::cout
+            << calculateRiskLevel()    << "|"
+            << calculateSeverity()     << "|"
+            << getRecommendation()     << "|"
+            << classifyCase()          << "|"
+            << riskScore;
+        // No trailing newline — Python strips stdout anyway
     }
 };
 
-// =========================
-// Main Function
-// =========================
 
+// ── Entry point ───────────────────────────────────────────────────────────────
 int main()
 {
+    int    symptomCount = 0;
+    double probability  = 0.0;
 
-    int symptomCount;
+    // Read two values from stdin (sent by Python subprocess)
+    if (!(std::cin >> symptomCount >> probability))
+    {
+        std::cerr << "ERROR: Could not read symptomCount and probability from stdin." << std::endl;
+        return 1;   // non-zero → Python raises RuntimeError
+    }
 
-    double probability;
+    if (symptomCount < 0 || probability < 0.0 || probability > 100.0)
+    {
+        std::cerr << "ERROR: Invalid input values."
+                  << " symptomCount=" << symptomCount
+                  << " probability="  << probability << std::endl;
+        return 1;
+    }
 
-    cin >> symptomCount;
-
-    cin >> probability;
-
-    RiskAnalyzer analyzer(
-
-        symptomCount,
-
-        probability
-
-    );
-
+    RiskAnalyzer analyzer(symptomCount, probability);
     analyzer.printReport();
 
-    return 0;
+    return 0;   // success
 }
